@@ -4,4 +4,3 @@ sqlalchemy
 passlib[bcrypt]
 pydantic
 python-jose
-sqlite3
