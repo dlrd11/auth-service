@@ -6,7 +6,7 @@ app = FastAPI()
 
 Base.metadata.create_all(bind=engine)  # This line initializes the database
 
-app.include_router(auth_router, prefix="/auth")
+app.include_router(auth_router)
 
 if __name__ == '__main__':
     import uvicorn

@@ -47,7 +47,10 @@ auth_service/
 python main.py
 ``
 
-The API should now be running and accessible at http://127.0.0.1:8000.
+The API should now be running and accessible at http://0.0.0.0:8000.
+
+uvicorn main:app --host 0.0.0.0 --port 8081 --reload
+
 
 ## How to run tests
 ``

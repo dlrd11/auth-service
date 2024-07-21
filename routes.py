@@ -1,11 +1,17 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status
+
+from fastapi import FastAPI, Depends, HTTPException, APIRouter, status
 from sqlalchemy.orm import Session
-from database import get_db
-from models import User
-from schemas import UserCreate, Token
-from auth import authenticate_user, create_access_token, decode_access_token, oauth2_scheme
 from fastapi.security import OAuth2PasswordRequestForm
+from jose import JWTError, jwt
+from datetime import datetime, timedelta
+from pydantic import BaseModel
+from passlib.context import CryptContext
+
+from auth import get_password_hash, authenticate_user, create_access_token, decode_access_token, oauth2_scheme
+from database import engine, get_db
+from models import Base, User
+from schemas import Token, UserCreate
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -14,39 +20,44 @@ logger = logging.getLogger(__name__)
 auth_router = APIRouter()
 
 
-@auth_router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED)
+@auth_router.post("/auth/register", response_model=Token, status_code=status.HTTP_201_CREATED)
 def register(user: UserCreate, db: Session = Depends(get_db)):
-    try:
-        db_user = db.query(User).filter(User.username == user.username).first()
-        if db_user:
-            raise HTTPException(status_code=400, detail="Username already registered")
+    db_user = db.query(User).filter(User.username == user.username).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="Username already registered")
 
-        new_user = User(username=user.username)
-        new_user.set_password(user.password)
-        db.add(new_user)
-        db.commit()
+    new_user = User(username=user.username, hashed_password=get_password_hash(user.password))
+    db.add(new_user)
+    db.commit()
 
-        access_token = create_access_token(data={"sub": new_user.username})
-        return {"access_token": access_token, "token_type": "bearer"}
-    except HTTPException as e:
-        logger.error(f"Error during user registration: {e.detail}")
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error during user registration: {e}")
-        raise HTTPException(status_code=500, detail="Internal Server Error")
+    access_token = create_access_token(data={"sub": new_user.username, "id": new_user.id})
+    return {"access_token": access_token, "token_type": "bearer"}
 
 
-@auth_router.post("/login", response_model=Token)
+@auth_router.post("/auth/login", response_model=Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
         raise HTTPException(status_code=400, detail="Incorrect username or password")
 
-    access_token = create_access_token(data={"sub": user.username})
+    access_token = create_access_token(data={"sub": user.username, "id": user.id})
     return {"access_token": access_token, "token_type": "bearer"}
 
 
-@auth_router.get("/verify")
-def verify(token: str = Depends(oauth2_scheme)):
-    payload = decode_access_token(token)
-    return {"username": payload.get("sub")}
+class Token(BaseModel):
+    access_token: str
+
+
+@auth_router.post("/auth/verify")
+def verify(body: Token, db: Session = Depends(get_db)):
+    payload = decode_access_token(body.access_token)
+    username = payload.get("sub")
+    user_id = payload.get("id")
+    if not username or not user_id:
+        raise HTTPException(status_code=400, detail="Token has no id or username")
+
+    user = db.query(User).filter(User.username == username, User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="User not found")
+
+    return {"username": username, "id": user_id}
